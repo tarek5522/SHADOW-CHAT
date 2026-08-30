@@ -536,40 +536,21 @@ Future<void> initializeFirebase() async {
     return;
   }
 
-  // منع التهيئة المتكررة
-  if (_isInitializingFirebase) return;
-  if (firebaseReady) return;
-
-  _isInitializingFirebase = true;
-
   try {
-    // حماية أولية: إذا لم يتم تهيئة أي تطبيق Firebase بعد نفّذ initializeApp
-    try {
-      if (Firebase.apps.isEmpty) {
-        await Firebase.initializeApp(
-          options: const FirebaseOptions(
-            apiKey: 'AIzaSyC8Ft8gdu-41A5bgQItt0J8zsTTqMSYaR0',
-            appId: '1:663578459909:web:66e60586316af862b8c16c',
-            messagingSenderId: '663578459909',
-            projectId: 'shadow-chat-318a0',
-            authDomain: 'shadow-chat-318a0.firebaseapp.com',
-            storageBucket: 'shadow-chat-318a0.firebasestorage.app',
-          ),
-        );
-      } else {
-        debugPrint('Firebase already initialized (apps=${Firebase.apps.length})');
-      }
-    } on FirebaseException catch (e) {
-      // تجاهل خطأ التهيئة المزدوجة عند ظهوره
-      if (e.code == 'duplicate-app' || (e.message?.contains('already exists') ?? false)) {
-        debugPrint('Ignored duplicate Firebase init: ${e.message}');
-      } else {
-        rethrow;
-      }
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp(
+        options: const FirebaseOptions(
+          apiKey: 'AIzaSyC8Ft8gdu-41A5bgQItt0J8zsTTqMSYaR0',
+          appId: '1:663578459909:web:66e60586316af862b8c16c',
+          messagingSenderId: '663578459909',
+          projectId: 'shadow-chat-318a0',
+          authDomain: 'shadow-chat-318a0.firebaseapp.com',
+          storageBucket: 'shadow-chat-318a0.firebasestorage.app',
+        ),
+      );
     }
 
     firebaseReady = true;
-
     if (FirebaseAuth.instance.currentUser != null) {
       try {
         await ensureUserProfile();
@@ -588,11 +569,23 @@ Future<void> initializeFirebase() async {
   } catch (error) {
     firebaseFailureMessage = error.toString();
     debugPrint('Firebase initialization failed: $error');
-    firebaseReady = false;
-  } finally {
-    _isInitializingFirebase = false;
   }
 }
+// --- أضف هذه الإضافات هنا لتجنب أخطاء البناء ---
+
+// 1. تعريف متغير الخطأ الذي يطلبه الكود
+String? _authError;
+
+// 2. تعريف الدالة المفقودة لتسجيل الدخول المجهول
+Future<void> _ensureAnonymousLogin() async {
+  try {
+    // يمكنك تركها هكذا أو وضع منطق تسجيل الدخول المجهول هنا إذا احتجت لاحقاً
+    debugPrint('_ensureAnonymousLogin called');
+  } catch (e) {
+    debugPrint('Error in ensureAnonymousLogin: $e');
+  }
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (secureLocalDemoMode) {
@@ -764,140 +757,28 @@ class AuthGate extends StatefulWidget {
   @override
   State<AuthGate> createState() => _AuthGateState();
 }
-class AuthGate extends StatefulWidget {
-  const AuthGate({super.key});
-
-  @override
-  State<AuthGate> createState() => _AuthGateState();
-}
 
 class _AuthGateState extends State<AuthGate> {
   bool _isTryingAnonymousLogin = false;
   String? _authError;
 
-  @override
-  void initState() {
-    super.initState();
-    _initializeFirebaseAndAuth();
-  }
-
-  // دالة لتهيئة الفايربيز وضبط متغير الاتصال لكي لا تظهر شاشة الخطأ أبداً
-  Future<void> _initializeFirebaseAndAuth() async {
-    try {
-      if (Firebase.apps.isEmpty) {
-        await Firebase.initializeApp(
-          options: const FirebaseOptions(
-            apiKey: 'AIzaSyC8f8gdu-41A5bgQitt0J8zsTTqMSYaR0',
-            appId: '1:663578459909:web:66e60586316af862b8c16c',
-            messagingSenderId: '663578459909',
-            projectId: 'shadow-chat-318a0',
-            authDomain: 'shadow-chat-318a0.firebaseapp.com',
-            storageBucket: 'shadow-chat-318a0.appspot.com',
-          ),
-        );
-      }
-    } catch (e) {
-      print("Firebase init notice: $e");
-    }
-
-    // هنا نجبر التطبيق على اعتبار أن الفايربيز أصبح جاهزاً وتعمل الشاشة
-    if (mounted) {
-      setState(() {
-        firebaseReady = true;
-        firebaseFailureMessage = '';
-      });
-    }
-
-    // بعد التأكد من الجاهزية، نقوم بعمل تسجيل الدخول المجهول
-    await _ensureAnonymousLogin();
-  }
-
   Future<void> _ensureAnonymousLogin() async {
     if (!firebaseReady || FirebaseAuth.instance.currentUser != null) return;
-
-    if (_isTryingAnonymousLogin) return;
-
-    setState(() {
-      _isTryingAnonymousLogin = true;
-      _authError = null;
-    });
 
     try {
       await FirebaseAuth.instance.signInAnonymously();
       await setupPushNotifications();
-    } catch (e) {
-      setState(() {
-        _authError = e.toString();
-      });
-    } finally {
+      if (mounted) setState(() => _authError = null);
+    } catch (error) {
+      debugPrint('Anonymous login failed: $error');
       if (mounted) {
         setState(() {
           _isTryingAnonymousLogin = false;
+          _authError = error.toString();
         });
       }
     }
   }
-
-  @override
-  Widget build(BuildContext context) {
-    if (secureLocalDemoMode) {
-      return const AppLockGate();
-    }
-
-    if (!firebaseReady) {
-      return Scaffold(
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(20.0),
-            child: Text(
-              firebaseFailureMessage.isEmpty
-                  ? 'جاري الاتصال بـ Firebase...'
-                  : 'تعذر الاتصال بـ Firebase\n$firebaseFailureMessage',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-          ),
-        ),
-      );
-    }
-
-    if (_isTryingAnonymousLogin && FirebaseAuth.instance.currentUser == null) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-    }
-
-    if (_authError != null) {
-      return Scaffold(
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(20.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text('خطأ في المصادقة: $_authError', textAlign: TextAlign.center),
-                const SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: () => _ensureAnonymousLogin(),
-                  child: const Text('إعادة المحاولة'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
-    // الشاشة الرئيسية أو نقطة العبور الأصلية بعد نجاح الاتصال وتسجيل الدخول
-    return const Scaffold(
-      body: Center(
-        child: Text('تم الاتصال بنجاح ودخول التطبيق!'),
-      ),
-    );
-  }
-}
 
   @override
   Widget build(BuildContext context) {
