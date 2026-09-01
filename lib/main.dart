@@ -295,6 +295,10 @@ Future<void> loadAppLockSettings() async {
 
   final preferences = await SharedPreferences.getInstance();
   enabled = preferences.getBool(appLockEnabledKey) ?? false;
+  final savedPasswordHash = preferences.getString(appLockPasswordHashKey);
+  if (savedPasswordHash != null && savedPasswordHash.isNotEmpty) {
+    passwordHash = savedPasswordHash;
+  }
 
   if (firebaseReady) {
     final user = FirebaseAuth.instance.currentUser;
@@ -307,15 +311,16 @@ Future<void> loadAppLockSettings() async {
             .doc('appLock');
         final lockSnapshot = await lockRef.get();
         final data = lockSnapshot.data();
-        if (data?['passwordHash'] is String) {
-          passwordHash = data!['passwordHash'] as String;
+        if (data?['passwordHash'] is String &&
+            (data!['passwordHash'] as String).isNotEmpty) {
+          passwordHash = data['passwordHash'] as String;
           enabled = data['enabled'] == true;
         } else {
           await lockRef.set({
             'passwordHash': passwordHash,
             'enabled': enabled,
             'updatedAt': FieldValue.serverTimestamp(),
-          });
+          }, SetOptions(merge: true));
         }
       } catch (error) {
         debugPrint('App lock Firebase load failed: $error');
@@ -825,6 +830,7 @@ class AuthGate extends StatefulWidget {
 
 class _AuthGateState extends State<AuthGate> {
   bool _isTryingAnonymousLogin = false;
+  bool _lockSettingsLoaded = false;
   String? _authError;
 
   Future<void> _ensureAnonymousLogin() async {
@@ -843,6 +849,12 @@ class _AuthGateState extends State<AuthGate> {
         });
       }
     }
+  }
+
+  void _loadLockSettingsOnce() {
+    if (_lockSettingsLoaded) return;
+    _lockSettingsLoaded = true;
+    unawaited(loadAppLockSettings());
   }
 
   @override
@@ -902,6 +914,7 @@ class _AuthGateState extends State<AuthGate> {
           );
         }
 
+        _loadLockSettingsOnce();
         return const AppLockGate();
       },
     );

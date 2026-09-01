@@ -26,6 +26,8 @@ dependency_overrides:
   path_provider_android: 2.2.2
   path_provider_linux: 2.2.2
   path_provider_windows: 2.3.0
+  google_sign_in_android: 6.1.24
+  firebase_core_platform_interface: 5.0.0
 
 dev_dependencies:
   flutter_test:

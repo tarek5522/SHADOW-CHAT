@@ -5,6 +5,10 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+dependencies {
+    implementation("com.google.android.material:material:1.9.0")
+}
+
 android {
     namespace = "com.example.shadow.chat"
     compileSdk = flutter.compileSdkVersion
@@ -32,6 +36,20 @@ android {
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
         }
+    }
+
+    packaging {
+        resources {
+            excludes.add("META-INF/proguard/androidx-*.pro")
+            excludes.add("META-INF/proguard/retrofit2.pro")
+        }
+    }
+
+    lint {
+        disable.add("MissingTranslation")
+        disable.add("ExtraTranslation")
+        disable.add("InvalidPackage")
+        textReport = true
     }
 }
 
