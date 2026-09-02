@@ -9,11 +9,15 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
 import 'dart:typed_data';
+import 'dart:io';
 
 // متغير عام يتحكم في حالة حركة الحوت في كل التطبيق
 final ValueNotifier<bool> whaleMotionNotifier = ValueNotifier<bool>(true);
@@ -1474,8 +1478,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const List<String> names = [];
-    const List<String> lastMessages = [];
+    final User? user = FirebaseAuth.instance.currentUser;
 
     return Directionality(
       textDirection: englishLanguageNotifier.value
@@ -1534,51 +1537,132 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   ),
                 ],
               ),
-              body: ListView.builder(
-                itemCount: names.length,
-                itemBuilder: (context, index) {
-                  return ListTile(
-                    leading: CircleAvatar(
-                      radius: 28,
-                      backgroundColor: const Color(0xFF00FF66).withOpacity(0.2),
+              body: user == null || !firebaseReady
+                  ? const Center(
                       child: Text(
-                        names[index][0],
-                        style: const TextStyle(
-                          color: Color(0xFF00FF66),
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
+                        'يرجى تسجيل الدخول أولاً',
+                        style: TextStyle(color: Colors.white70),
                       ),
+                    )
+                  : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                      stream: FirebaseFirestore.instance
+                          .collection('users')
+                          .doc(user.uid)
+                          .collection(contactsCollectionName(ContactScope.regular))
+                          .orderBy('updatedAt', descending: true)
+                          .snapshots(),
+                      builder: (context, snapshot) {
+                        if (snapshot.hasError) {
+                          return Center(
+                            child: Text(
+                              'خطأ في تحميل الدردشات: ${snapshot.error}',
+                              style: const TextStyle(color: Colors.red),
+                            ),
+                          );
+                        }
+
+                        if (!snapshot.hasData) {
+                          return const Center(
+                            child: CircularProgressIndicator(
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Color(0xFF00FF66),
+                              ),
+                            ),
+                          );
+                        }
+
+                        final contacts = snapshot.data?.docs ?? [];
+
+                        if (contacts.isEmpty) {
+                          return Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(
+                                  Icons.chat_bubble_outline,
+                                  color: Color(0xFF00FF66),
+                                  size: 48,
+                                ),
+                                const SizedBox(height: 16),
+                                const Text(
+                                  'لا توجد دردشات',
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 18,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                const Text(
+                                  'أضف جهات اتصال جديدة للبدء',
+                                  style: TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+
+                        return ListView.builder(
+                          itemCount: contacts.length,
+                          itemBuilder: (context, index) {
+                            final contactData = contacts[index].data();
+                            final contactName = contactData['displayName'] ?? 'مستخدم';
+                            final lastMessage = contactData['lastMessage'] ?? 'لا توجد رسائل';
+                            final contactUid = contacts[index].id;
+
+                            return ListTile(
+                              leading: CircleAvatar(
+                                radius: 28,
+                                backgroundColor: const Color(0xFF00FF66).withOpacity(0.2),
+                                child: Text(
+                                  contactName.toString().isNotEmpty
+                                      ? contactName.toString()[0]
+                                      : 'م',
+                                  style: const TextStyle(
+                                    color: Color(0xFF00FF66),
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                              title: Text(
+                                contactName.toString(),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              subtitle: Text(
+                                lastMessage.toString(),
+                                style: const TextStyle(color: Colors.white70),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              trailing: const Text(
+                                "أمس",
+                                style: TextStyle(
+                                  color: Color(0xFF00FF66),
+                                  fontSize: 12,
+                                ),
+                              ),
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => ChatScreen(
+                                      chatName: contactName.toString(),
+                                      contactUid: contactUid,
+                                    ),
+                                  ),
+                                );
+                              },
+                            );
+                          },
+                        );
+                      },
                     ),
-                    title: Text(
-                      names[index],
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    subtitle: Text(
-                      lastMessages[index],
-                      style: const TextStyle(color: Colors.white70),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: const Text(
-                      "أمس",
-                      style: TextStyle(color: Color(0xFF00FF66), fontSize: 12),
-                    ),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) =>
-                              ChatScreen(chatName: names[index]),
-                        ),
-                      );
-                    },
-                  );
-                },
-              ),
               floatingActionButton: Container(
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
@@ -1791,6 +1875,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
           'contactId': publicId,
           'uid': targetUid,
           'displayName': displayName.isEmpty ? 'جهة اتصال' : displayName,
+          'lastMessage': 'لا توجد رسائل',
+          'name': displayName.isEmpty ? 'جهة اتصال' : displayName,
           'updatedAt': FieldValue.serverTimestamp(),
           'createdAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
@@ -4898,6 +4984,12 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                       change.type == DocumentChangeType.added &&
                       change.doc.data()?['uid'] != currentUid,
                 );
+            
+            // الاحتفاظ بالرسائل المحلية التي لم تُرسل بعد
+            final localMessages = _messages
+                .where((msg) => !msg.isMe || msg.mediaFile != null)
+                .toList();
+            
             final messages = snapshot.docs.map((doc) {
               final data = doc.data();
               return Message(
@@ -4908,10 +5000,17 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                 mediaUrl: data['mediaUrl'] as String?,
               );
             }).toList();
+            
             setState(() {
-              _messages
-                ..clear()
-                ..addAll(messages);
+              _messages.clear();
+              _messages.addAll(messages);
+              // إضافة الرسائل المحلية المعلقة في النهاية
+              _messages.addAll(localMessages
+                  .where((local) => 
+                      messages.every((server) => 
+                          server.originalText != local.originalText ||
+                          server.mediaUrl != local.mediaUrl))
+                  .toList());
             });
             _hasLoadedMessages = true;
             if (shouldNotify) unawaited(_playMessageNotification());
@@ -4962,6 +5061,28 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
             DateTime.now().add(const Duration(seconds: 8)),
           ),
       });
+
+      // تحديث lastMessage في جهات الاتصال
+      if (widget.contactUid != null) {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .collection(contactsCollectionName(ContactScope.regular))
+            .doc(widget.contactUid)
+            .get();
+
+        if (userDoc.exists) {
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .collection(contactsCollectionName(ContactScope.regular))
+              .doc(widget.contactUid)
+              .update({
+                'lastMessage': text.length > 50 ? '${text.substring(0, 50)}...' : text,
+                'updatedAt': FieldValue.serverTimestamp(),
+              });
+        }
+      }
     } catch (error) {
       debugPrint('Chat message save error: $error');
       if (mounted) {
@@ -5123,42 +5244,72 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
   Future<void> _toggleVoiceRecording() async {
     if (_isRecording) {
-      final String? path = await _voiceRecorder.stop();
-      if (!mounted) return;
-      setState(() => _isRecording = false);
-      if (path != null) {
-        final voiceFile = XFile(path);
-        final mediaUrl = await _uploadMedia(voiceFile, 'audio');
-        setState(() {
-          final Message voiceMessage = Message(
-            originalText: '🎙️ رسالة صوتية',
-            encryptedData: path,
-            isMe: true,
-            mediaType: 'audio',
-            mediaFile: voiceFile,
-            mediaUrl: mediaUrl,
+      try {
+        final String? path = await _voiceRecorder.stop();
+        if (!mounted) return;
+        setState(() => _isRecording = false);
+        if (path != null && path.isNotEmpty) {
+          final voiceFile = XFile(path);
+          final mediaUrl = await _uploadMedia(voiceFile, 'audio');
+          setState(() {
+            final Message voiceMessage = Message(
+              originalText: '🎙️ رسالة صوتية',
+              encryptedData: path,
+              isMe: true,
+              mediaType: 'audio',
+              mediaFile: voiceFile,
+              mediaUrl: mediaUrl,
+            );
+            _messages.add(voiceMessage);
+            _scheduleMessageDeletion(voiceMessage);
+          });
+          if (mediaUrl != null) {
+            await _saveUploadedMediaMessage('🎙️ رسالة صوتية', 'audio', mediaUrl);
+          }
+        }
+      } catch (error) {
+        debugPrint('Voice recording stop error: $error');
+        if (mounted) {
+          setState(() => _isRecording = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('خطأ في إيقاف التسجيل: $error')),
           );
-          _messages.add(voiceMessage);
-          _scheduleMessageDeletion(voiceMessage);
-        });
-        await _saveUploadedMediaMessage('🎙️ رسالة صوتية', 'audio', mediaUrl);
+        }
       }
       return;
     }
 
-    if (!await _voiceRecorder.hasPermission()) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('اسمح للتطبيق باستخدام الميكروفون أولًا')),
-      );
-      return;
-    }
+    try {
+      final hasPermission = await _voiceRecorder.hasPermission();
+      if (!hasPermission) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('اسمح للتطبيق باستخدام الميكروفون أولًا')),
+        );
+        return;
+      }
 
-    await _voiceRecorder.start(
-      const RecordConfig(encoder: AudioEncoder.opus),
-      path: 'shadow_voice_${DateTime.now().millisecondsSinceEpoch}.wav',
-    );
-    if (mounted) setState(() => _isRecording = true);
+      final recordPath = await getApplicationDocumentsDirectory();
+      final fileName = 'shadow_voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      final filePath = '${recordPath.path}/$fileName';
+
+      await _voiceRecorder.start(
+        const RecordConfig(
+          encoder: AudioEncoder.aacLc,
+          sampleRate: 44100,
+          bitRate: 128000,
+        ),
+        path: filePath,
+      );
+      if (mounted) setState(() => _isRecording = true);
+    } catch (error) {
+      debugPrint('Voice recording start error: $error');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ في بدء التسجيل: $error')),
+        );
+      }
+    }
   }
 
   Future<void> _pickMedia({
@@ -5169,9 +5320,11 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         ? await _mediaPicker.pickVideo(source: source)
         : await _mediaPicker.pickImage(source: source);
     if (file == null || !mounted) return;
+    
     final mediaType = video ? 'video' : 'image';
-    final mediaUrl = await _uploadMedia(file, mediaType);
-
+    
+    // إضافة الرسالة محليًا أولاً لتظهير فوري
+    final messageIndex = _messages.length;
     setState(() {
       _messages.add(
         Message(
@@ -5180,20 +5333,91 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           isMe: true,
           mediaType: mediaType,
           mediaFile: file,
-          mediaUrl: mediaUrl,
+          mediaUrl: null,
         ),
       );
       _scheduleMessageDeletion(_messages.last);
     });
-    await _saveUploadedMediaMessage(
-      video ? '🎬 فيديو' : '🖼️ صورة',
-      mediaType,
-      mediaUrl,
-    );
+
+    // رفع الملف في الخلفية
+    try {
+      final mediaUrl = await _uploadMedia(file, mediaType);
+      if (mediaUrl != null && mounted && messageIndex < _messages.length) {
+        // إنشاء رسالة جديدة برابط الملف
+        setState(() {
+          _messages[messageIndex] = Message(
+            originalText: video ? '🎬 فيديو' : '🖼️ صورة',
+            encryptedData: file.name,
+            isMe: true,
+            mediaType: mediaType,
+            mediaFile: file,
+            mediaUrl: mediaUrl,
+          );
+        });
+        
+        // حفظ الرسالة في Firebase
+        await _saveUploadedMediaMessage(
+          video ? '🎬 فيديو' : '🖼️ صورة',
+          mediaType,
+          mediaUrl,
+        );
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('فشل رفع الملف')),
+        );
+        // إزالة الرسالة الفاشلة
+        if (mounted) {
+          setState(() {
+            if (messageIndex < _messages.length) {
+              _messages.removeAt(messageIndex);
+            }
+          });
+        }
+      }
+    } catch (error) {
+      debugPrint('Media pick error: $error');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ: $error')),
+        );
+        // إزالة الرسالة الفاشلة
+        setState(() {
+          if (messageIndex < _messages.length) {
+            _messages.removeAt(messageIndex);
+          }
+        });
+      }
+    }
   }
 
   Future<String?> _uploadMedia(XFile file, String mediaType) async {
-    return null;
+    if (!firebaseReady) return null;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return null;
+
+    try {
+      final fileName = '${mediaType}_${DateTime.now().millisecondsSinceEpoch}_${file.name}';
+      final uploadTask = FirebaseStorage.instance
+          .ref()
+          .child('users')
+          .child(user.uid)
+          .child('media')
+          .child(mediaType)
+          .child(fileName)
+          .putFile(File(file.path));
+
+      final snapshot = await uploadTask;
+      final downloadUrl = await snapshot.ref.getDownloadURL();
+      return downloadUrl;
+    } catch (error) {
+      debugPrint('Media upload error: $error');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ في رفع الملف: $error')),
+        );
+      }
+      return null;
+    }
   }
 
   Future<void> _saveUploadedMediaMessage(
@@ -5205,20 +5429,58 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
     try {
-      await FirebaseFirestore.instance
+      final chatRef = FirebaseFirestore.instance
           .collection('chats')
-          .doc(_chatId)
-          .collection('messages')
-          .add({
-            'text': text,
-            'uid': user.uid,
-            'sender': 'مستخدم',
-            'mediaType': mediaType,
-            'mediaUrl': mediaUrl,
-            'createdAt': FieldValue.serverTimestamp(),
-          });
+          .doc(_chatId);
+      
+      await chatRef.set({
+        'participants':
+            widget.contactUid == null
+                  ? [user.uid]
+                  : [user.uid, widget.contactUid].toList()
+              ..sort(),
+        'chatType': widget.contactUid == null ? 'group' : 'direct',
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      await chatRef.collection('messages').add({
+        'text': text,
+        'uid': user.uid,
+        'sender': 'مستخدم',
+        'mediaType': mediaType,
+        'mediaUrl': mediaUrl,
+        if (widget.contactUid != null) 'recipientUid': widget.contactUid,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      // تحديث lastMessage في جهات الاتصال
+      if (widget.contactUid != null) {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .collection(contactsCollectionName(ContactScope.regular))
+            .doc(widget.contactUid)
+            .get();
+
+        if (userDoc.exists) {
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .collection(contactsCollectionName(ContactScope.regular))
+              .doc(widget.contactUid)
+              .update({
+                'lastMessage': text,
+                'updatedAt': FieldValue.serverTimestamp(),
+              });
+        }
+      }
     } catch (error) {
       debugPrint('Media message save error: $error');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ في حفظ الرسالة: $error')),
+        );
+      }
     }
   }
 
@@ -5502,9 +5764,13 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildMessageContent(Message message) {
+    // معالجة الصور
     if (message.mediaType == 'image' &&
         (message.mediaFile != null || message.mediaUrl != null)) {
-      if (message.mediaUrl != null && message.mediaFile == null) {
+      debugPrint('عرض صورة: mediaUrl=${message.mediaUrl}, mediaFile=${message.mediaFile?.name}');
+      
+      // عرض من رابط Firebase
+      if (message.mediaUrl != null && message.mediaUrl!.isNotEmpty) {
         return ClipRRect(
           borderRadius: BorderRadius.circular(12),
           child: Image.network(
@@ -5512,59 +5778,177 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
             width: 220,
             height: 160,
             fit: BoxFit.cover,
+            errorBuilder: (context, error, stackTrace) {
+              debugPrint('خطأ في تحميل الصورة من الرابط: $error');
+              return Container(
+                width: 220,
+                height: 160,
+                decoration: BoxDecoration(
+                  color: Colors.grey[800],
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.image_not_supported, color: Colors.white54),
+                    SizedBox(height: 8),
+                    Text(
+                      'فشل تحميل الصورة',
+                      style: TextStyle(color: Colors.white54, fontSize: 12),
+                    ),
+                  ],
+                ),
+              );
+            },
+            loadingBuilder: (context, child, loadingProgress) {
+              if (loadingProgress == null) return child;
+              return Container(
+                width: 220,
+                height: 160,
+                decoration: BoxDecoration(
+                  color: Colors.grey[800],
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Center(
+                  child: CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      Color(0xFF00FF66),
+                    ),
+                  ),
+                ),
+              );
+            },
           ),
         );
       }
-      return FutureBuilder<Uint8List>(
-        future: message.mediaFile!.readAsBytes(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData)
-            return const SizedBox(
-              width: 180,
-              height: 120,
-              child: Center(child: CircularProgressIndicator()),
+      
+      // عرض من ملف محلي
+      if (message.mediaFile != null) {
+        debugPrint('عرض صورة محلية: ${message.mediaFile?.name}');
+        return FutureBuilder<Uint8List>(
+          future: message.mediaFile!.readAsBytes(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return Container(
+                width: 220,
+                height: 160,
+                decoration: BoxDecoration(
+                  color: Colors.grey[800],
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Center(
+                  child: CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      Color(0xFF00FF66),
+                    ),
+                  ),
+                ),
+              );
+            }
+            
+            if (!snapshot.hasData || snapshot.data == null) {
+              return Container(
+                width: 220,
+                height: 160,
+                decoration: BoxDecoration(
+                  color: Colors.grey[800],
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.image_not_supported, color: Colors.white54),
+                    SizedBox(height: 8),
+                    Text(
+                      'لم تتمكن من قراءة الصورة',
+                      style: TextStyle(color: Colors.white54, fontSize: 12),
+                    ),
+                  ],
+                ),
+              );
+            }
+            
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.memory(
+                snapshot.data!,
+                width: 220,
+                height: 160,
+                fit: BoxFit.cover,
+              ),
             );
-          return ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: Image.memory(
-              snapshot.data!,
-              width: 220,
-              height: 160,
-              fit: BoxFit.cover,
-            ),
+          },
+        );
+      }
+    }
+    
+    // معالجة الفيديوهات
+    if (message.mediaType == 'video') {
+      return GestureDetector(
+        onTap: () {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('عذراً، تشغيل الفيديو غير مدعوم حالياً')),
           );
         },
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.grey[800],
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.play_circle_fill_rounded,
+                color: Colors.amberAccent,
+                size: 34,
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  message.mediaFile?.name ?? 'فيديو',
+                  style: const TextStyle(color: Colors.white),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
       );
     }
-    if (message.mediaType == 'video') {
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(
-            Icons.play_circle_fill_rounded,
-            color: Colors.amberAccent,
-            size: 34,
-          ),
-          const SizedBox(width: 8),
-          Text(
-            message.mediaFile?.name ?? 'فيديو',
-            style: const TextStyle(color: Colors.white),
-          ),
-        ],
-      );
-    }
+    
+    // معالجة التسجيلات الصوتية
     if (message.mediaType == 'audio') {
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(
-            Icons.graphic_eq_rounded,
-            color: Color(0xFF00FF66),
-            size: 28,
+      return GestureDetector(
+        onTap: () {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('تشغيل الرسالة الصوتية...')),
+          );
+        },
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF00FF66).withOpacity(0.1),
+            border: Border.all(color: const Color(0xFF00FF66), width: 1),
+            borderRadius: BorderRadius.circular(12),
           ),
-          const SizedBox(width: 8),
-          const Text('رسالة صوتية', style: TextStyle(color: Colors.white)),
-        ],
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.graphic_eq_rounded,
+                color: Color(0xFF00FF66),
+                size: 28,
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'رسالة صوتية 🎙️',
+                style: TextStyle(color: Colors.white),
+              ),
+            ],
+          ),
+        ),
       );
     }
     return Text(
@@ -6046,6 +6430,53 @@ class _AccountAndThemeScreenState extends State<AccountAndThemeScreen> {
       final bytes = await image.readAsBytes();
       userProfileImageBytesNotifier.value = bytes;
       if (mounted) setState(() => _profileImageUrl = null);
+      
+      // رفع الصورة إلى Firebase Storage وحفظ الرابط
+      await _uploadProfileImage(image);
+    }
+  }
+
+  Future<void> _uploadProfileImage(XFile image) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (!firebaseReady || user == null) return;
+
+    try {
+      final fileName = 'profile_${user.uid}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final uploadTask = FirebaseStorage.instance
+          .ref()
+          .child('users')
+          .child(user.uid)
+          .child('profile')
+          .child(fileName)
+          .putFile(File(image.path));
+
+      final snapshot = await uploadTask;
+      final downloadUrl = await snapshot.ref.getDownloadURL();
+
+      // حفظ رابط الصورة في Firebase
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .set({
+            'photoUrl': downloadUrl,
+            'photoUpdatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+
+      if (mounted) {
+        setState(() {
+          _profileImageUrl = downloadUrl;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تم حفظ الصورة الشخصية بنجاح ✨')),
+        );
+      }
+    } catch (error) {
+      debugPrint('Profile image upload error: $error');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ في حفظ الصورة: $error')),
+        );
+      }
     }
   }
 
@@ -6065,6 +6496,18 @@ class _AccountAndThemeScreenState extends State<AccountAndThemeScreen> {
           _profileImageUrl = data?['photoUrl'] as String?;
           nameController.text = userName;
         });
+
+        // تحميل الصورة من الرابط إذا كانت موجودة
+        if (_profileImageUrl != null && _profileImageUrl!.isNotEmpty) {
+          try {
+            final response = await http.get(Uri.parse(_profileImageUrl!));
+            if (response.statusCode == 200) {
+              userProfileImageBytesNotifier.value = response.bodyBytes;
+            }
+          } catch (imageError) {
+            debugPrint('Profile image load error: $imageError');
+          }
+        }
       }
     } catch (error) {
       debugPrint('Profile load error: $error');
