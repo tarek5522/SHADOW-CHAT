@@ -14,6 +14,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'dart:convert';
 import 'dart:async';
 import 'dart:typed_data';
@@ -99,6 +101,148 @@ Future<void> setupPushNotifications() async {
   } catch (error) {
     debugPrint('Push notification setup failed: $error');
   }
+}
+
+Future<void> checkForUpdates(BuildContext context) async {
+  if (!firebaseReady) return;
+  try {
+    final packageInfo = await PackageInfo.fromPlatform();
+    final currentVersion = packageInfo.version;
+    
+    final updateDoc = await FirebaseFirestore.instance
+        .collection('appUpdates')
+        .doc('latestVersion')
+        .get();
+    
+    if (!updateDoc.exists) return;
+    
+    final latestVersion = updateDoc.data()?['version'] as String?;
+    final downloadUrl = updateDoc.data()?['downloadUrl'] as String?;
+    final updateMessage = updateDoc.data()?['message'] as String?;
+    final isForced = updateDoc.data()?['forced'] as bool? ?? false;
+    
+    if (latestVersion == null || latestVersion == currentVersion) return;
+    
+    // مقارنة الإصدارات
+    if (_isNewVersionAvailable(currentVersion, latestVersion)) {
+      if (context.mounted) {
+        _showUpdateDialog(
+          context,
+          latestVersion,
+          updateMessage ?? 'تطبيق جديد متاح! يرجى التحديث للاستمتاع بالميزات الجديدة.',
+          downloadUrl,
+          isForced,
+        );
+      }
+    }
+  } catch (error) {
+    debugPrint('Update check error: $error');
+  }
+}
+
+bool _isNewVersionAvailable(String current, String latest) {
+  try {
+    final currentParts = current.split('.');
+    final latestParts = latest.split('.');
+    
+    for (int i = 0; i < (currentParts.length > latestParts.length ? latestParts.length : currentParts.length); i++) {
+      final currentNum = int.tryParse(currentParts[i].split('-')[0]) ?? 0;
+      final latestNum = int.tryParse(latestParts[i].split('-')[0]) ?? 0;
+      
+      if (latestNum > currentNum) return true;
+      if (latestNum < currentNum) return false;
+    }
+    return false;
+  } catch (e) {
+    debugPrint('Version comparison error: $e');
+    return false;
+  }
+}
+
+void _showUpdateDialog(
+  BuildContext context,
+  String newVersion,
+  String message,
+  String? downloadUrl,
+  bool isForced,
+) {
+  showDialog(
+    context: context,
+    barrierDismissible: !isForced,
+    builder: (dialogContext) => AlertDialog(
+      backgroundColor: const Color(0xFF1A1A1A),
+      title: const Row(
+        children: [
+          Icon(Icons.system_update, color: Color(0xFF00FF66), size: 24),
+          SizedBox(width: 10),
+          Text(
+            'تحديث جديد متاح ✨',
+            style: TextStyle(color: Color(0xFF00FF66), fontSize: 18),
+          ),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Text(
+            message,
+            style: const TextStyle(color: Colors.white70, fontSize: 14),
+            textAlign: TextAlign.right,
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.grey[800],
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              'الإصدار الجديد: $newVersion',
+              style: const TextStyle(
+                color: Color(0xFF00FF66),
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        if (!isForced)
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text(
+              'تحديث لاحقاً',
+              style: TextStyle(color: Colors.white54),
+            ),
+          ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF00FF66),
+            foregroundColor: Colors.black,
+          ),
+          onPressed: () async {
+            Navigator.pop(dialogContext);
+            if (downloadUrl != null && downloadUrl.isNotEmpty) {
+              if (await canLaunchUrl(Uri.parse(downloadUrl))) {
+                await launchUrl(Uri.parse(downloadUrl), mode: LaunchMode.externalApplication);
+              } else {
+                if (dialogContext.mounted) {
+                  ScaffoldMessenger.of(dialogContext).showSnackBar(
+                    const SnackBar(content: Text('لم تتمكن من فتح رابط التحميل')),
+                  );
+                }
+              }
+            }
+          },
+          child: const Text(
+            'تحديث الآن',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 String appText(String arabic, String english) {
@@ -1225,6 +1369,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkAndShowIntroduction();
+      // التحقق من التحديثات
+      if (mounted) {
+        checkForUpdates(context);
+      }
     });
   }
 
